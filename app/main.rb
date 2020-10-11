@@ -2,8 +2,6 @@ require 'lib/geo_geo.rb'
 
 # @param [GTK::Args] args
 def tick(args)
-  trace!(GeoGeo::MagicHelper)
-  GTK::Trace.flush_trace true
   stress = 0 # Crank this up if you want to do stress testing. Polygons are currently *very* slow, so don't go too crazy.
 
   args.state.type ||= 7
