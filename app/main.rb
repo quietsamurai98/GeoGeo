@@ -2,7 +2,7 @@ require 'lib/geo_geo.rb'
 
 # @param [GTK::Args] args
 def tick(args)
-  stress = 249 # Crank this up if you want to do stress testing. The demos will test stress+1 collisions per frame.
+  stress = 249 # Crank this up if you want to do stress testing. Polygons are currently *very* slow, so don't go too crazy.
 
   args.state.type ||= 0
   args.outputs.labels << {x: 10, y: 30, text: "FPS : #{$gtk.current_framerate.to_s.to_i}", r: 255, g: 0, b: 0}
@@ -10,14 +10,13 @@ def tick(args)
   box(args, stress) if args.state.type == 0
   box_circ(args, stress) if args.state.type == 1
   circ(args, stress) if args.state.type == 2
-  poly(args, stress) if args.state.type == 3
-  conv_poly(args, stress) if args.state.type == 4
-  point_poly(args, stress) if args.state.type == 5
-  circ_poly(args, stress) if args.state.type == 6
-  box_poly(args, stress) if args.state.type == 7
+  conv_poly(args, stress) if args.state.type == 3
+  poly(args, stress) if args.state.type == 4
+  circ_poly(args, stress) if args.state.type == 5
+  box_poly(args, stress) if args.state.type == 6
 
-  args.state.type == 5 ? $gtk.show_cursor : $gtk.hide_cursor
-  args.state.type = (args.state.type + 1) % 8 if args.inputs.keyboard.key_down.space
+  # args.state.type == 5 ? $gtk.show_cursor : $gtk.hide_cursor
+  args.state.type = (args.state.type + 1) % 7 if args.inputs.keyboard.key_down.space
 end
 
 def box(args, iters)
@@ -123,7 +122,7 @@ end
 # @param [GTK::Args] args
 # @param [Object] iters
 def point_poly(args, iters)
-  verts = [[0,0], [110, 40], [220, 20], [180, 90], [200, 160], [60, 180], [40, 120], [180, 140], [160, 40], [120, 60], [100, 200], [60, 190], [20, 220], [30, 110]]
+  verts = [[0, 0], [110, 40], [220, 20], [180, 90], [200, 160], [60, 180], [40, 120], [180, 140], [160, 40], [120, 60], [100, 200], [60, 190], [20, 220], [30, 110]]
   a = GeoGeo::Polygon.new(verts)
   a.set_center([640.0, 360.0])
   b = args.inputs.mouse
@@ -344,5 +343,6 @@ def conv_poly(args, iters)
         b: 0
     }.line
   end
+
   args.outputs.primitives << prims
 end
