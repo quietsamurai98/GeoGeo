@@ -131,6 +131,8 @@ module GeoGeo
   class Polygon < Shape2D
     # @return [Array<Array<Float>>]
     attr_reader :verts, :hull_verts, :hull_norms
+    # @return [Array<Float>]
+    attr_reader :verts_x, :hull_verts_x, :hull_norms_x, :verts_y, :hull_verts_y, :hull_norms_y
     # @return [Boolean]
     attr_reader :convex
     # @return [Float]
@@ -144,6 +146,8 @@ module GeoGeo
       # trace!
       @verts = verts.map(&:clone)
       @verts << [*@verts[0]] if @verts[0] != @verts[-1]
+      @verts_x = @verts.map(&:first)
+      @verts_y = @verts.map(&:last)
       __calc_hull
       @convex = @verts == @hull_verts
       @theta = theta
@@ -156,17 +160,45 @@ module GeoGeo
     # @return [Float]
     def theta=(theta)
       d_theta = theta - @theta
+      return theta if d_theta == 0
       c, s = Math.cos(d_theta), Math.sin(d_theta)
       t, b, l, r = @center.y, @center.y, @center.x, @center.x
-      @verts.each do |v|
-        v.x, v.y = @center.x + (v.x - @center.x) * c - (v.y - @center.y) * s, @center.y + (v.x - @center.x) * s + (v.y - @center.y) * c
-        l = v.x if v.x < l
-        r = v.x if v.x > r
-        b = v.y if v.y < b
-        t = v.y if v.y > t
+      index = 0
+      limit = @verts.length
+      while index < limit
+        vx = @verts_x[index]
+        vy = @verts_y[index]
+        vx, vy = @center.x + (vx - @center.x) * c - (vy - @center.y) * s, @center.y + (vx - @center.x) * s + (vy - @center.y) * c
+        @verts_x[index] = vx
+        @verts_y[index] = vy
+        @verts[index] = [vx, vy]
+        l = vx if vx < l
+        r = vx if vx > r
+        b = vy if vy < b
+        t = vy if vy > t
+        index+=1
       end
-      @hull_norms.each do |v|
-        v.x, v.y = v.x * c - v.y * s, v.x * s + v.y * c
+      index = 0
+      limit = @hull_verts.length
+      while index < limit
+        vx = @hull_verts_x[index]
+        vy = @hull_verts_y[index]
+        vx, vy = @center.x + (vx - @center.x) * c - (vy - @center.y) * s, @center.y + (vx - @center.x) * s + (vy - @center.y) * c
+        @hull_verts_x[index] = vx
+        @hull_verts_y[index] = vy
+        @hull_verts[index] = [vx, vy]
+        index+=1
+      end
+      index = 0
+      limit = @hull_norms.length
+      while index < limit
+        vx = @hull_norms_x[index]
+        vy = @hull_norms_y[index]
+        vx, vy = @center.x + (vx - @center.x) * c - (vy - @center.y) * s, @center.y + (vx - @center.x) * s + (vy - @center.y) * c
+        @hull_norms_x[index] = vx
+        @hull_norms_y[index] = vy
+        @hull_norms[index] = [vx, vy]
+        index+=1
       end
       @left, @right, @bottom, @top, @width, @height = l, r, b, t, r - l, t - b
       @theta = theta
@@ -189,6 +221,20 @@ module GeoGeo
         v.x += dx
         v.y += dy
       end
+      @hull_verts.each do |v|
+        v.x += dx
+        v.y += dy
+      end
+      @hull_norms.each do |v|
+        v.x += dx
+        v.y += dy
+      end
+      @verts_x = @verts.map(&:x)
+      @verts_y = @verts.map(&:y)
+      @hull_verts_x = @hull_verts.map(&:x)
+      @hull_verts_y = @hull_verts.map(&:y)
+      @hull_norms_x = @hull_norms.map(&:x)
+      @hull_norms_y = @hull_norms.map(&:y)
     end
 
     # @param [Float] x
@@ -200,14 +246,14 @@ module GeoGeo
       winding_number = 0
       # This isn't very idiomatic ruby, but it is faster this way
       index = 0
-      limit = @verts.length-1
+      limit = @verts.length - 1
       while index < limit
-        if @verts[index].y <= y
-          winding_number += 1 if @verts[index+1].y > y && __left(@verts[index], @verts[index+1], [x, y]) > 0
+        if @verts_y[index] <= y
+          winding_number += 1 if @verts_y[index + 1] > y && __left(@verts_x[index], @verts_y[index], @verts_x[index + 1], @verts_y[index + 1], x, y) > 0
         else
-          winding_number -= 1 if @verts[index+1].y <= y && __left(@verts[index], @verts[index+1], [x, y]) < 0
+          winding_number -= 1 if @verts_y[index + 1] <= y && __left(@verts_x[index], @verts_y[index], @verts_x[index + 1], @verts_y[index + 1], x, y) < 0
         end
-        index+=1
+        index += 1
       end
 
       winding_number != 0
@@ -215,12 +261,15 @@ module GeoGeo
 
     private
 
-    # @param [Array<Float>] a
-    # @param [Array<Float>] b
-    # @param [Array<Float>] c
+    # @param [Float] ax
+    # @param [Float] ay
+    # @param [Float] bx
+    # @param [Float] by
+    # @param [Float] cx
+    # @param [Float] cy
     # @return [Float]
-    def __left(a, b, c)
-      (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y)
+    def __left(ax, ay, bx, by, cx, cy)
+      (bx - ax) * (cy - ay) - (cx - ax) * (by - ay)
     end
 
     # @return [nil]
@@ -228,37 +277,54 @@ module GeoGeo
       if @verts.length > 4
         pivot = @verts[0]
         @verts.each do |v|
-          pivot = v if v.y < pivot.y || (v.y == pivot.y && v.x < pivot.x)
+          pivot = [*v] if v.y < pivot.y || (v.y == pivot.y && v.x < pivot.x)
         end
         points = @verts.map do |v|
-          {x: v, y: [Math.atan2(v.y - pivot.y, v.x - pivot.x), (v.x - pivot.x) * (v.x - pivot.x) + (v.y - pivot.y) * (v.y - pivot.y)]}
+          {x: [*v], y: [Math.atan2(v.y - pivot.y, v.x - pivot.x), (v.x - pivot.x) * (v.x - pivot.x) + (v.y - pivot.y) * (v.y - pivot.y)]}
         end.sort_by(&:y)
         # @type [Array] points
-        points = points.map.with_index do |v, i|
-          if i != points.length - 1 && v.y[0] == points[i + 1].y[0]
-            v.x #nil
-          else
-            v.x
-          end
-        end
-        points.compact!
-        @hull_verts = []
+        points = points.map(&:x)
+        hull_verts = []
+        hull_verts_x = []
+        hull_verts_y = []
         points.each do |v|
-          if @hull_verts.length < 3
-            @hull_verts.push(v) if @hull_verts[-1] != v
-          else
-            while __left(@hull_verts[-2], @hull_verts[-1], v) < 0
-              @hull_verts.pop
+          vx = v.x
+          vy = v.y
+          if hull_verts.length < 3
+            if hull_verts[-1] != v
+              hull_verts.push([*v])
+              hull_verts_x.push(vx)
+              hull_verts_y.push(vy)
             end
-            @hull_verts.push(v) if @hull_verts[-1] != v
+          else
+            while __left(hull_verts_x[-2], hull_verts_y[-2], hull_verts_x[-1], hull_verts_y[-1], vx, vy) < 0
+              hull_verts.pop
+              hull_verts_x.pop
+              hull_verts_y.pop
+            end
+            if hull_verts[-1] != v
+              hull_verts.push([*v])
+              hull_verts_x.push(vx)
+              hull_verts_y.push(vy)
+            end
           end
         end
+        @hull_verts = hull_verts
+        @hull_verts_x = hull_verts_x
+        @hull_verts_y = hull_verts_y
         if @hull_verts.length + 1 == @verts.length
-          @hull_verts.rotate!(@hull_verts.index(@verts[0]))
+          tmp = @hull_verts.index(@verts[0])
+          @hull_verts.rotate!(tmp)
+          @hull_verts_x.rotate!(tmp)
+          @hull_verts_y.rotate!(tmp)
         end
-        @hull_verts.push(@hull_verts[0])
+        @hull_verts.push([*@hull_verts[0]])
+        @hull_verts_x.push(@hull_verts_x[0])
+        @hull_verts_y.push(@hull_verts_y[0])
       else
-        @hull_verts = @verts
+        @hull_verts = @verts.map(&:clone)
+        @hull_verts_x = @verts_x.clone
+        @hull_verts_y = @verts_y.clone
       end
 
       @hull_norms = @hull_verts.each_cons(2).map do
@@ -276,6 +342,8 @@ module GeoGeo
         norm.y /= mag
         norm
       end.uniq
+      @hull_norms_x = @hull_norms.map(&:x)
+      @hull_norms_y = @hull_norms.map(&:y)
     end
 
     protected
@@ -336,7 +404,6 @@ class GeoGeoHelper
     return dx * dx + dy * dy <= b.r2
   end
 
-  # WARNING: This is *slow*
   # @param [GeoGeo::Box] a
   # @param [GeoGeo::Polygon] b
   # @return [Boolean]
@@ -354,27 +421,28 @@ class GeoGeoHelper
     limit = b.verts.length
     cs_verts = Array.new(b.verts.length)
     while index < limit
-      v = b.verts[index]
+      vx = b.verts_x[index]
+      vy = b.verts_y[index]
       code = 0b0000
-      if v.x < a.left
+      if vx < a.left
         code |= 0b0001
-      elsif v.x > a.right
+      elsif vx > a.right
         code |= 0b0010
       end
-      if v.y < a.bottom
+      if vy < a.bottom
         code |= 0b0100
-      elsif v.y > a.top
+      elsif vy > a.top
         code |= 0b1000
       end
       return true if code == 0b0000 # Vertex within box indicates collision. Return early
-      cs_verts[index] = [v.x, v.y, code]
-      index+=1
+      cs_verts[index] = [vx, vy, code]
+      index += 1
     end
     index = 0
-    limit = cs_verts.length-1
+    limit = cs_verts.length - 1
     cs_edges = []
     while index < limit
-      cs_edges << [cs_verts[index],cs_verts[index+1]] if 0b0000 == cs_verts[index][2] & cs_verts[index+1][2]
+      cs_edges << [cs_verts[index], cs_verts[index + 1]] if 0b0000 == cs_verts[index][2] & cs_verts[index + 1][2]
       index += 1
     end
     # Test if any lines trivially cross opposite bounds, return early if so
@@ -430,33 +498,37 @@ class GeoGeoHelper
     dx * dx + dy * dy <= (a.r + b.r) * (a.r + b.r)
   end
 
-  # WARNING: This is *slow*
   # @param [GeoGeo::Circle] a
   # @param [GeoGeo::Polygon] b
   # @return [Boolean]
   def circ_poly_intersect?(a, b)
     return false unless aabb_intersect?(a, b)
-
     return true if b.point_inside?(a.x, a.y)
-
     index = 0
     limit = b.verts.length - 1
     while index < limit
       # @type p1 [Array<Float>]
       # @type p2 [Array<Float>]
-      p1, p2 = b.verts[index], b.verts[index+1]
-      ac = [a.x - p1.x, a.y - p1.y]
-      return true if dot(ac, ac) <= a.r2 # Vert in circle. Early return
-      ab = [p2.x - p1.x, p2.y - p1.y]
-      t = (dot(ac, ab) / dot(ab, ab)).clamp(0, 1)
-      h = [(ab.x * t + p1.x) - a.x, (ab.y * t + p1.y) - a.y]
-      return true if dot(h, h) <= a.r2
+      # p1, p2 = b.verts.values_at(index, index+1)
+      p1x = b.verts_x[index]
+      p1y = b.verts_y[index]
+      p2x = b.verts_x[index + 1]
+      p2y = b.verts_y[index + 1]
+
+      acx = a.x - p1x
+      acy = a.y - p1y
+      return true if acx * acx + acy * acy <= a.r2 # Vert in circle. Early return
+      abx = p2x - p1x
+      aby = p2y - p1y
+      t = ((acx * abx + acy * aby) / (abx * abx + aby * aby)).clamp(0, 1)
+      tmp1 = (abx * t + p1x) - a.x
+      tmp2 = (aby * t + p1y) - a.y
+      return true if (tmp1 * tmp1 + tmp2 * tmp2) <= a.r2
       index += 1
     end
     false
   end
 
-  # WARNING: This is *slow*
   # @param [GeoGeo::Polygon] a
   # @param [GeoGeo::Box] b
   # @return [Boolean]
@@ -464,7 +536,6 @@ class GeoGeoHelper
     box_poly_intersect?(b, a)
   end
 
-  # WARNING: This is *slow*
   # @param [GeoGeo::Polygon] a
   # @param [GeoGeo::Circle] b
   # @return [Boolean]
@@ -472,7 +543,6 @@ class GeoGeoHelper
     circ_poly_intersect?(b, a)
   end
 
-  # WARNING: This is *very* *slow*
   # @param [GeoGeo::Polygon] a
   # @param [GeoGeo::Polygon] b
   # @return [Boolean]
@@ -480,20 +550,23 @@ class GeoGeoHelper
     return false unless aabb_intersect?(a, b)
     # TODO: Polygons
     # Phase 1: SAT test with the convex hulls. If the convex hulls don't collide, the polygons don't collide.
-    return false unless sat_intersect?(a.hull_norms, a.hull_verts, b.hull_verts)
-    return false unless sat_intersect?(b.hull_norms, a.hull_verts, b.hull_verts)
+    return false unless sat_intersect?(a.hull_norms_x,a.hull_norms_y, a.hull_verts_x,a.hull_verts_y, b.hull_verts_x,b.hull_verts_y)
+    return false unless sat_intersect?(b.hull_norms_x,b.hull_norms_y, a.hull_verts_x,a.hull_verts_y, b.hull_verts_x,b.hull_verts_y)
     return true if a.convex && b.convex # If both are convex, SAT is all you need to see if they are colliding.
     # Phase 2: Check if one covers the other, using the first vert as a proxy.
-    return true if a.point_inside?(*b.verts[0]) || b.point_inside?(*a.verts[0])
+    return true if a.point_inside?(b.verts_x[0], b.verts_y[0]) || b.point_inside?(a.verts_x[0], a.verts_y[0])
     # Phase 3: Check if the two perimeters overlap.
     index = 0
     limit = a.verts.length - 1
     jimit = b.verts.length - 1
     while index < limit
       jndex = 0
-      e1 = [a.verts[index], a.verts[index+1]]
+      e1x1 = a.verts_x[index]
+      e1x2 = a.verts_x[index+1]
+      e1y1 = a.verts_y[index]
+      e1y2 = a.verts_y[index+1]
       while jndex < jimit
-        return true if line_line_intersect?(e1, [b.verts[jndex], b.verts[jndex+1]])
+        return true if line_line_intersect?(e1x1,e1y1,e1x2,e1y2,b.verts_x[jndex],b.verts_y[jndex],b.verts_x[jndex+1],b.verts_y[jndex+1])
         jndex += 1
       end
       index += 1
@@ -510,44 +583,58 @@ class GeoGeoHelper
     (v1.x * v2.x) + (v1.y * v2.y)
   end
 
-  # @param [Array<Float>] a
-  # @param [Array<Float>] b
-  # @param [Array<Float>] c
+
+  # @param [Float] ax
+  # @param [Float] ay
+  # @param [Float] bx
+  # @param [Float] by
+  # @param [Float] cx
+  # @param [Float] cy
   # @return [Boolean]
-  def ccw(a, b, c)
-    (c.y - a.y) * (b.x - a.x) > (b.y - a.y) * (c.x - a.x)
+  def ccw?(ax, ay, bx, by, cx, cy)
+    (cy - ay) * (bx - ax) > (by - ay) * (cx - ax)
   end
 
-  # @param [Array<Array<Float>>, Enumerable<Array<Float>>] a
-  # @param [Array<Array<Float>>, Enumerable<Array<Float>>] b
+
+  # @param [Float] ax1
+  # @param [Float] ay1
+  # @param [Float] ax2
+  # @param [Float] ay2
+  # @param [Float] bx1
+  # @param [Float] by1
+  # @param [Float] bx2
+  # @param [Float] by2
   # @return [Boolean]
-  def line_line_intersect?(a, b)
-    ccw(a[0], b[0], b[1]) != ccw(a[1], b[0], b[1]) && ccw(a[0], a[1], b[0]) != ccw(a[0], a[1], b[1])
+  def line_line_intersect?(ax1,ay1,ax2,ay2,bx1,by1,bx2,by2)
+    ccw?(ax1, ay1, bx1, by1, bx2, by2) != ccw?(ax2, ay2, bx1, by1, bx2, by2) && ccw?(ax1, ay1, ax2, ay2, bx1, by1) != ccw?(ax1, ay1, ax2, ay2, bx2, by2)
   end
 
-  # WARNING: This is *slow*. Why?
-  # @param [Array<Array<Float>>] axes
-  # @param [Array<Array<Float>>] vert_a
-  # @param [Array<Array<Float>>] vert_b
+  # @param [Array<Float>] axes_x
+  # @param [Array<Float>] axes_y
+  # @param [Array<Float>] vert_ax
+  # @param [Array<Float>] vert_ay
+  # @param [Array<Float>] vert_bx
+  # @param [Array<Float>] vert_by
   # @return [Boolean]
-  def sat_intersect?(axes, vert_a, vert_b)
-    index, limit = 0, axes.length
+  def sat_intersect?(axes_x,axes_y,vert_ax,vert_ay, vert_bx,vert_by)
+    index, limit = 0, axes_x.length
     while index < limit
-      axis = axes[index]
+      axis_x = axes_x[index]
+      axis_y = axes_y[index]
 
       # Test to see if the polygons do *not* overlap on this axis.
       a_min, a_max = 1e300, -1e300
-      jndex, jimit = 0, vert_a.length
+      jndex, jimit = 0, vert_ax.length
       while jndex < jimit
-        tmp = axis.x * vert_a[jndex].x + axis.y * vert_a[jndex].y
+        tmp = axis_x * vert_ax[jndex] + axis_y * vert_ay[jndex]
         a_min = tmp if tmp < a_min
         a_max = tmp if tmp > a_max
         jndex += 1
       end
       b_min, b_max = 1e300, -1e300
-      jndex, jimit = 0, vert_b.length
+      jndex, jimit = 0, vert_bx.length
       while jndex < jimit
-        tmp = axis.x * vert_b[jndex].x + axis.y * vert_b[jndex].y
+        tmp = axis_x * vert_bx[jndex] + axis_y * vert_by[jndex]
         b_min = tmp if tmp < b_min
         b_max = tmp if tmp > b_max
         jndex += 1
