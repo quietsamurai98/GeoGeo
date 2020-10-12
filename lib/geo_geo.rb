@@ -195,17 +195,19 @@ module GeoGeo
     # @param [Float] y
     # @return [Boolean] Whether or not the point is contained within the shape.
     def point_inside?(x, y)
-      return false unless (@left..@right).cover?(x) && (@bottom..@top).cover?(y)
+      return false unless @left < x && x < @right && @bottom < y && y < @top
 
       winding_number = 0
-      @verts.each_cons(2) do
-        # @type [Array<Array<Float>>] seg
-      |seg|
-        if seg[0].y <= y
-          winding_number += 1 if seg[1].y > y && __left?(seg[0], seg[1], [x, y]) > 0
+      # This isn't very idiomatic ruby, but it is faster this way
+      index = 0
+      limit = @verts.length-1
+      while index < limit
+        if @verts[index].y <= y
+          winding_number += 1 if @verts[index+1].y > y && __left(@verts[index], @verts[index+1], [x, y]) > 0
         else
-          winding_number -= 1 if seg[1].y <= y && __left?(seg[0], seg[1], [x, y]) < 0
+          winding_number -= 1 if @verts[index+1].y <= y && __left(@verts[index], @verts[index+1], [x, y]) < 0
         end
+        index+=1
       end
 
       winding_number != 0
@@ -217,7 +219,7 @@ module GeoGeo
     # @param [Array<Float>] b
     # @param [Array<Float>] c
     # @return [Float]
-    def __left?(a, b, c)
+    def __left(a, b, c)
       (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y)
     end
 
@@ -245,7 +247,7 @@ module GeoGeo
           if @hull_verts.length < 3
             @hull_verts.push(v) if @hull_verts[-1] != v
           else
-            while __left?(@hull_verts[-2], @hull_verts[-1], v) < 0
+            while __left(@hull_verts[-2], @hull_verts[-1], v) < 0
               @hull_verts.pop
             end
             @hull_verts.push(v) if @hull_verts[-1] != v
@@ -348,7 +350,11 @@ class GeoGeoHelper
 
     # TODO: This feels like it is hilariously over engineered.
 
-    cs_verts = b.verts.map do |v|
+    index = 0
+    limit = b.verts.length
+    cs_verts = Array.new(b.verts.length)
+    while index < limit
+      v = b.verts[index]
       code = 0b0000
       if v.x < a.left
         code |= 0b0001
@@ -361,21 +367,31 @@ class GeoGeoHelper
         code |= 0b1000
       end
       return true if code == 0b0000 # Vertex within box indicates collision. Return early
-      [v.x, v.y, code]
+      cs_verts[index] = [v.x, v.y, code]
+      index+=1
     end
-    # @type [Array] cs_edges
-    cs_edges = cs_verts.each_cons(2).find_all do |v1, v2|
-      0b0000 == v1[2] & v2[2]
+    index = 0
+    limit = cs_verts.length-1
+    cs_edges = []
+    while index < limit
+      cs_edges << [cs_verts[index],cs_verts[index+1]] if 0b0000 == cs_verts[index][2] & cs_verts[index+1][2]
+      index += 1
     end
     # Test if any lines trivially cross opposite bounds, return early if so
-    cs_edges.each do |v1, v2|
-      return true if v1[2] | v2[2] == 0b0011 || v1[2] | v2[2] == 0b1100
+    index = 0
+    limit = cs_edges.length
+    while index < limit
+      return true if cs_edges[index][0][2] | cs_edges[index][1][2] == 0b0011 || cs_edges[index][0][2] | cs_edges[index][1][2] == 0b1100
+      index += 1
     end
+
     # Test if any lines non-trivially cross a relevant boundary
-    cs_edges.each do
+    index = 0
+    limit = cs_edges.length
+    while index < limit
       # @type [Array<Float>] p1
       # @type [Array<Float>] p2
-    |p1, p2|
+      p1, p2 = cs_edges[index]
       x_min, x_max = p1.x, p2.x
       x_min, x_max = x_max, x_min if (x_min > x_max)
       x_min, x_max = x_min.greater(a.left), x_max.lesser(a.right)
@@ -392,6 +408,7 @@ class GeoGeoHelper
       y_max = y_max.lesser(a.top)
       y_min = y_min.greater(a.bottom)
       return true if y_min <= y_max
+      index += 1
     end
     false
   end
@@ -422,17 +439,21 @@ class GeoGeoHelper
 
     return true if b.point_inside?(a.x, a.y)
 
-    b.verts.each_cons(2).any? do
+    index = 0
+    limit = b.verts.length - 1
+    while index < limit
       # @type p1 [Array<Float>]
       # @type p2 [Array<Float>]
-    |p1, p2|
+      p1, p2 = b.verts[index], b.verts[index+1]
       ac = [a.x - p1.x, a.y - p1.y]
       return true if dot(ac, ac) <= a.r2 # Vert in circle. Early return
       ab = [p2.x - p1.x, p2.y - p1.y]
       t = (dot(ac, ab) / dot(ab, ab)).clamp(0, 1)
       h = [(ab.x * t + p1.x) - a.x, (ab.y * t + p1.y) - a.y]
-      dot(h, h) <= a.r2
+      return true if dot(h, h) <= a.r2
+      index += 1
     end
+    false
   end
 
   # WARNING: This is *slow*
@@ -465,11 +486,19 @@ class GeoGeoHelper
     # Phase 2: Check if one covers the other, using the first vert as a proxy.
     return true if a.point_inside?(*b.verts[0]) || b.point_inside?(*a.verts[0])
     # Phase 3: Check if the two perimeters overlap.
-    a.verts.each_cons(2).any? do |e1|
-      b.verts.each_cons(2).any? do |e2|
-        line_line_intersect?(e1, e2)
+    index = 0
+    limit = a.verts.length - 1
+    jimit = b.verts.length - 1
+    while index < limit
+      jndex = 0
+      e1 = [a.verts[index], a.verts[index+1]]
+      while jndex < jimit
+        return true if line_line_intersect?(e1, [b.verts[jndex], b.verts[jndex+1]])
+        jndex += 1
       end
+      index += 1
     end
+    false
   end
 
   private
@@ -502,33 +531,32 @@ class GeoGeoHelper
   # @param [Array<Array<Float>>] vert_b
   # @return [Boolean]
   def sat_intersect?(axes, vert_a, vert_b)
-    axes.none? do
-      # @type [Array<Float>] axis
-    |axis|
+    index, limit = 0, axes.length
+    while index < limit
+      axis = axes[index]
+
       # Test to see if the polygons do *not* overlap on this axis.
+      a_min, a_max = 1e300, -1e300
+      jndex, jimit = 0, vert_a.length
+      while jndex < jimit
+        tmp = axis.x * vert_a[jndex].x + axis.y * vert_a[jndex].y
+        a_min = tmp if tmp < a_min
+        a_max = tmp if tmp > a_max
+        jndex += 1
+      end
+      b_min, b_max = 1e300, -1e300
+      jndex, jimit = 0, vert_b.length
+      while jndex < jimit
+        tmp = axis.x * vert_b[jndex].x + axis.y * vert_b[jndex].y
+        b_min = tmp if tmp < b_min
+        b_max = tmp if tmp > b_max
+        jndex += 1
+      end
 
-      a_min, a_max = vert_a.minmax_by do
-        # @type [Array<Float>] v
-      |v|
-        axis.x * v.x + axis.y * v.y
-      end.map do
-        # @type [Array<Float>] v
-      |v|
-        axis.x * v.x + axis.y * v.y
-      end # minmax_by.map is *way* faster than map.minmax
-
-      b_min, b_max = vert_b.minmax_by do
-        # @type [Array<Float>] v
-      |v|
-        axis.x * v.x + axis.y * v.y
-      end.map do
-        # @type [Array<Float>] v
-      |v|
-        axis.x * v.x + axis.y * v.y
-      end # minmax_by.map is *way* faster than map.minmax
-
-      (a_min > b_max) || (b_min > a_max) # A separating axis exists. Thus, they cannot be intersecting.
+      return false if (a_min > b_max) || (b_min > a_max) # A separating axis exists. Thus, they cannot be intersecting.
+      index += 1
     end
+    true
   end
 
 end
