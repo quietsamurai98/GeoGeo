@@ -194,7 +194,7 @@ module GeoGeo
       while index < limit
         vx = @hull_norms_x[index]
         vy = @hull_norms_y[index]
-        vx, vy = @center.x + (vx - @center.x) * c - (vy - @center.y) * s, @center.y + (vx - @center.x) * s + (vy - @center.y) * c
+        vx, vy = vx * c - vy * s, vx * s + vy * c
         @hull_norms_x[index] = vx
         @hull_norms_y[index] = vy
         @hull_norms[index] = [vx, vy]
@@ -225,16 +225,10 @@ module GeoGeo
         v.x += dx
         v.y += dy
       end
-      @hull_norms.each do |v|
-        v.x += dx
-        v.y += dy
-      end
       @verts_x = @verts.map(&:x)
       @verts_y = @verts.map(&:y)
       @hull_verts_x = @hull_verts.map(&:x)
       @hull_verts_y = @hull_verts.map(&:y)
-      @hull_norms_x = @hull_norms.map(&:x)
-      @hull_norms_y = @hull_norms.map(&:y)
     end
 
     # @param [Float] x
@@ -342,8 +336,8 @@ module GeoGeo
         norm.y /= mag
         norm
       end.uniq
-      @hull_norms_x = @hull_norms.map(&:x)
-      @hull_norms_y = @hull_norms.map(&:y)
+      @hull_norms_x = @hull_norms.map(&:first)
+      @hull_norms_y = @hull_norms.map(&:last)
     end
 
     protected
